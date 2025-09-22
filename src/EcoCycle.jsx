@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { collection, addDoc } from "firebase/firestore";
 import { db } from "./firebase";
 import Map from "./components/Map";
@@ -33,6 +33,11 @@ const EcoCycle = () => {
   const liveModelRef = useRef(null);
   const mapRef = useRef(null);
 
+  // --- Cooldown maps (keep only one declaration) ---
+const lastSpokenMap = useRef({}); // track speech cooldowns
+const lastWalletUpdate = useRef({}); // track wallet update cooldowns
+
+
   // --- Load Live Detection Model ---
   useEffect(() => {
     const loadModel = async () => {
@@ -49,8 +54,6 @@ const EcoCycle = () => {
   }, []);
 
 
-/// --- Speech Synthesis (debounced per material) ---
-const lastSpokenMap = {}; // cooldowns per material
 
 const getCurrentLang = () => {
   return document.documentElement.lang || "en";
@@ -93,41 +96,40 @@ const speak = (text, materialType) => {
 };
 
 
-// --- Update Wallet From Live Detection ---
-const lastWalletUpdate = {}; // track cooldowns per material
+// --- Determine if a label is recyclable and assign a type ---
+const getRecyclableType = (label) => {
+  const cls = label.toLowerCase();
+  if (["bottle", "cup", "plastic", "can"].some((r) => cls.includes(r))) return "Plastic";
+  if (["paper", "book", "newspaper", "cardboard"].some((r) => cls.includes(r))) return "Paper";
+  if (["metal"].some((r) => cls.includes(r))) return "Metal";
+  if (["glass", "wine"].some((r) => cls.includes(r))) return "Glass";
+  return null; // null means non-recyclable
+};
 
-const updateWalletFromDetection = async (materialType) => {
+// --- Update Wallet Dynamically ---
+const updateWalletFromDetection = async (label) => {
+  const materialType = getRecyclableType(label);
+  if (!materialType) {
+    setToast("⚠️ Non-recyclable item detected, no reward.");
+    setTimeout(() => setToast(null), 3000);
+    return;
+  }
+
   const pricePerKgMap = {
     Plastic: 50,
     Paper: 30,
     Metal: 100,
     Glass: 70,
-    "Non-recyclable": 0,
   };
 
-  if (materialType === "Non-recyclable") {
-    setError("Non-recyclable item detected, no wallet update.");
-    // show red toast for clarity
-    setToast("⚠️ Non-recyclable detected, no reward.");
-    setTimeout(() => setToast(null), 3000);
-    return;
-  }
-
-  const now = Date.now();
-  if (lastWalletUpdate[materialType] && now - lastWalletUpdate[materialType] < 5000) {
-    return;
-  }
-  lastWalletUpdate[materialType] = now;
-
-  const pricePerKg = pricePerKgMap[materialType] || 0;
-  const weight = 1;
+  const weight = 1; // default weight, you can extend to dynamic input
   const newPoints = points + 10 * weight;
-  const newCash = cash + pricePerKg * weight;
+  const newCash = cash + (pricePerKgMap[materialType] || 0) * weight;
 
   setPoints(newPoints);
   setCash(newCash);
 
-  setToast(`+₦${pricePerKg * weight} & +${10 * weight} points (${materialType})`);
+  setToast(`+₦${pricePerKgMap[materialType] * weight} & +${10 * weight} points (${materialType})`);
   setTimeout(() => setToast(null), 3000);
 
   try {
@@ -137,7 +139,7 @@ const updateWalletFromDetection = async (materialType) => {
       weight,
       points: newPoints,
       cash: newCash,
-      pricePerKg,
+      pricePerKg: pricePerKgMap[materialType] || 0,
       timestamp: new Date(),
     });
   } catch (error) {
@@ -145,6 +147,7 @@ const updateWalletFromDetection = async (materialType) => {
     setError("Failed to update wallet. Try again.");
   }
 };
+
 
 
 const startCamera = () => {
@@ -207,21 +210,20 @@ const startCamera = () => {
     });
 };
 
+
+const COOLDOWN_MS = 5000; // 5 seconds cooldown per material
+
+// --- Live Detection Loop (Direct Model Labels) ---
 const detectFrame = async () => {
   if (!liveModelRef.current || !videoRef.current) return;
 
   const video = videoRef.current;
 
-  if (
-    video.readyState !== 4 ||
-    video.videoWidth === 0 ||
-    video.videoHeight === 0
-  ) {
+  if (video.readyState !== 4 || video.videoWidth === 0 || video.videoHeight === 0) {
     requestAnimationFrame(detectFrame);
     return;
   }
 
-  // sync canvas size
   if (canvasRef.current.width !== video.videoWidth) {
     canvasRef.current.width = video.videoWidth;
     canvasRef.current.height = video.videoHeight;
@@ -229,33 +231,35 @@ const detectFrame = async () => {
 
   const predictions = await liveModelRef.current.detect(video);
   const counts = {};
+  const detectedThisFrame = {};
+  const now = Date.now();
 
-  // 🔥 Loop through predictions
   predictions.forEach((pred) => {
-  const cls = pred.class.toLowerCase();
+    const rawLabel = pred.class; // raw model label
+    const labelLower = rawLabel.toLowerCase();
 
-  if (cls.includes("plastic")) {
-    counts["Plastic"] = (counts["Plastic"] || 0) + 1;
-    updateWalletFromDetection("Plastic");
-    speak("Plastic detected", "Plastic");  // ✅ Add speech here
-  } else if (cls.includes("paper")) {
-    counts["Paper"] = (counts["Paper"] || 0) + 1;
-    updateWalletFromDetection("Paper");
-    speak("Paper detected", "Paper");  // ✅
-  } else if (cls.includes("metal")) {
-    counts["Metal"] = (counts["Metal"] || 0) + 1;
-    updateWalletFromDetection("Metal");
-    speak("Metal detected", "Metal");  // ✅
-  } else if (cls.includes("glass")) {
-    counts["Glass"] = (counts["Glass"] || 0) + 1;
-    updateWalletFromDetection("Glass");
-    speak("Glass detected", "Glass");  // ✅
-  } else {
-    counts["Non-recyclable"] = (counts["Non-recyclable"] || 0) + 1;
-    updateWalletFromDetection("Non-recyclable");
-    speak("Non recyclable detected", "Non-recyclable");  // ✅
-  }
-});
+    // Check if it's a recyclable type
+    const isRecyclable = ["bottle","can","cup","plastic","metal","glass","paper","cardboard"].some(r => labelLower.includes(r));
+    const displayLabel = isRecyclable ? rawLabel : "Non-recyclable";
+
+    counts[displayLabel] = (counts[displayLabel] || 0) + 1;
+
+    if (!detectedThisFrame[displayLabel]) {
+      detectedThisFrame[displayLabel] = true;
+
+      // 🔊 Speak only if cooldown passed
+      if (!lastSpokenMap.current[displayLabel] || now - lastSpokenMap.current[displayLabel] > COOLDOWN_MS) {
+        speak(`${displayLabel} detected`, displayLabel);
+        lastSpokenMap.current[displayLabel] = now;
+      }
+
+      // 💰 Optional: reward only if recyclable
+      if (isRecyclable && (!lastWalletUpdate.current[rawLabel] || now - lastWalletUpdate.current[rawLabel] > COOLDOWN_MS)) {
+        updateWalletFromDetection(rawLabel);
+        lastWalletUpdate.current[rawLabel] = now;
+      }
+    }
+  });
 
   setLiveCount(counts);
 
@@ -263,20 +267,29 @@ const detectFrame = async () => {
   ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
   ctx.drawImage(video, 0, 0, canvasRef.current.width, canvasRef.current.height);
 
-  // ✅ Draw boxes + labels
   predictions.forEach((pred) => {
-    ctx.strokeStyle = pred.class.toLowerCase().includes("organic")
-      ? "#FF4500"
-      : "#FFD700";
+    const rawLabel = pred.class;
+    const labelLower = rawLabel.toLowerCase();
+    const isRecyclable = ["bottle","can","cup","plastic","metal","glass","paper","cardboard"].some(r => labelLower.includes(r));
+    const displayLabel = isRecyclable ? rawLabel : "Non-recyclable";
+
+    let color = "#FFD700"; // default
+    if (["bottle","cup","plastic"].some(r => labelLower.includes(r))) color = "#1E90FF";
+    else if (["paper","book","newspaper","cardboard"].some(r => labelLower.includes(r))) color = "#32CD32";
+    else if (["can","metal"].some(r => labelLower.includes(r))) color = "#C0C0C0";
+    else if (["glass","wine"].some(r => labelLower.includes(r))) color = "#00CED1";
+    else color = "#FF4500"; // non-recyclable
+
+    ctx.strokeStyle = color;
     ctx.lineWidth = 2;
     ctx.strokeRect(pred.bbox[0], pred.bbox[1], pred.bbox[2], pred.bbox[3]);
-    ctx.fillStyle = ctx.strokeStyle;
-    ctx.fillText(pred.class, pred.bbox[0], pred.bbox[1] - 5);
+    ctx.fillStyle = color;
+    ctx.font = "16px Arial";
+    ctx.fillText(displayLabel, pred.bbox[0], pred.bbox[1] - 5);
   });
 
   requestAnimationFrame(detectFrame);
 };
-
 
 
   // --- Classify Waste ---
