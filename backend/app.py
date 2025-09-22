@@ -15,12 +15,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Environment variable
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 if not GROQ_API_KEY:
     raise ValueError("⚠️ Missing GROQ_API_KEY environment variable")
 
+# Models & pricing
 VISION_MODELS = ["meta-llama/llama-4-scout-17b-16e-instruct"]
-
 PRICING = {
     "Plastic": 30,
     "Paper": 10,
@@ -30,6 +31,7 @@ PRICING = {
     "Other": 0
 }
 
+# Utilities
 def encode_image_to_base64(image_bytes):
     return base64.b64encode(image_bytes).decode('utf-8')
 
@@ -40,6 +42,7 @@ Provide confidence and reasoning in JSON format.
 """
 
 async def classify_with_httpx(image_bytes, model_name="meta-llama/llama-4-scout-17b-16e-instruct"):
+    """Call Groq REST API for classification"""
     base64_image = encode_image_to_base64(image_bytes)
     url = f"https://api.groq.com/v1/models/{model_name}/completions"
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
@@ -56,19 +59,19 @@ async def classify_with_httpx(image_bytes, model_name="meta-llama/llama-4-scout-
         "temperature": 0.1,
         "max_tokens": 1024
     }
-
     async with httpx.AsyncClient() as client:
         response = await client.post(url, headers=headers, json=payload, timeout=60)
         response.raise_for_status()
         return response.json()["choices"][0]["message"]["content"]
 
 def parse_classification_response(response_text):
+    """Extract class, confidence, and reasoning from Groq response"""
     try:
         json_match = re.search(r'\{[^}]*\}', response_text, re.DOTALL)
         if json_match:
             result = json.loads(json_match.group())
             return result.get("class", "Other"), float(result.get("confidence", 0.5)), result.get("reasoning", "")
-        # Fallback
+        # Fallback heuristic
         response_lower = response_text.lower()
         for cat in ["Plastic","Paper","Metal","Glass","Organic"]:
             if cat.lower() in response_lower:
@@ -77,6 +80,7 @@ def parse_classification_response(response_text):
     except:
         return "Other", 0.3, "Failed to parse response"
 
+# Endpoints
 @app.post("/classify")
 async def classify(file: UploadFile = File(...)):
     try:
@@ -104,3 +108,69 @@ async def classify(file: UploadFile = File(...)):
                 continue
     except Exception as e:
         return {"error": f"Classification failed: {str(e)}"}
+
+@app.post("/analyze-detailed")
+async def analyze_detailed(file: UploadFile = File(...)):
+    try:
+        image_bytes = await file.read()
+        base64_image = encode_image_to_base64(image_bytes)
+        detailed_prompt = """Analyze this image in detail and provide:
+1. What objects do you see?
+2. What materials are they made of?
+3. Are they recyclable?
+4. What condition are they in?
+5. Any identifying text or brands?
+
+Be thorough and descriptive."""
+        url = "https://api.groq.com/v1/models/llava-v1.5-7b-4096-preview/completions"
+        headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
+        payload = {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": detailed_prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                    ]
+                }
+            ],
+            "temperature": 0.3,
+            "max_tokens": 1024
+        }
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, headers=headers, json=payload, timeout=60)
+            response.raise_for_status()
+            detailed_analysis = response.json()["choices"][0]["message"]["content"]
+
+        return {
+            "detailed_analysis": detailed_analysis,
+            "model_used": "llava-v1.5-7b-4096-preview"
+        }
+    except Exception as e:
+        return {"error": f"Detailed analysis failed: {str(e)}"}
+
+@app.get("/test-connection")
+async def test_connection():
+    try:
+        url = "https://api.groq.com/v1/models/meta-llama/llama-4-scout-17b-16e-instruct/completions"
+        headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
+        payload = {
+            "messages": [{"role": "user", "content": "Hello, just testing the connection."}],
+            "max_tokens": 50
+        }
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, headers=headers, json=payload, timeout=30)
+            response.raise_for_status()
+            test_response = response.json()["choices"][0]["message"]["content"]
+
+        return {
+            "status": "SUCCESS! Groq API is working",
+            "test_response": test_response,
+            "available_models": VISION_MODELS
+        }
+    except Exception as e:
+        return {"error": f"Groq API test failed: {str(e)}"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
