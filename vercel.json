@@ -1,0 +1,6 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm run build",
+  "installCommand": "npm ci && npm install --no-save --platform=linuxmusl --arch=x64 @rollup/rollup-linux-x64-gnu",
+  "framework": "vite"
+}
