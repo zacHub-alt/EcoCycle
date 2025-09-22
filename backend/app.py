@@ -1,7 +1,6 @@
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 import base64
-import io
 import json
 import os
 import re
@@ -16,17 +15,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Environment variables
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-SANITY_PROJECT_ID = os.getenv("SANITY_PROJECT_ID")
-SANITY_DATASET = os.getenv("SANITY_DATASET")
+if not GROQ_API_KEY:
+    raise ValueError("⚠️ Missing GROQ_API_KEY environment variable")
 
-if not GROQ_API_KEY or not SANITY_PROJECT_ID or not SANITY_DATASET:
-    raise ValueError("⚠️ Missing GROQ_API_KEY, SANITY_PROJECT_ID or SANITY_DATASET environment variables")
-
-VISION_MODELS = [
-    "meta-llama/llama-4-scout-17b-16e-instruct"
-]
+VISION_MODELS = ["meta-llama/llama-4-scout-17b-16e-instruct"]
 
 PRICING = {
     "Plastic": 30,
@@ -42,35 +35,13 @@ def encode_image_to_base64(image_bytes):
 
 def create_waste_classification_prompt():
     return """You are a waste classification expert. Analyze this image and classify the waste item into one of these categories:
-
-CATEGORIES:
-- Plastic: bottles, containers, bags, packaging, toys
-- Paper: newspapers, cardboard, books, documents
-- Metal: cans, foil, appliances, tools
-- Glass: bottles, jars, windows, mirrors
-- Organic: food waste, plant matter, biodegradable items
-- Other: items that don't fit the above categories
-
-INSTRUCTIONS:
-1. Look carefully at the image
-2. Identify the main waste item(s)
-3. Classify based on the material composition
-4. Provide your confidence level (0.0 to 1.0)
-
-RESPONSE FORMAT (JSON only):
-{
-    "class": "category_name",
-    "confidence": 0.85,
-    "reasoning": "brief explanation of why you classified it this way"
-}
-
-Analyze the image now:"""
+CATEGORIES: Plastic, Paper, Metal, Glass, Organic, Other
+Provide confidence and reasoning in JSON format.
+"""
 
 async def classify_with_httpx(image_bytes, model_name="meta-llama/llama-4-scout-17b-16e-instruct"):
-    """Classify waste using Groq REST API via httpx"""
     base64_image = encode_image_to_base64(image_bytes)
     url = f"https://api.groq.com/v1/models/{model_name}/completions"
-    
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
     payload = {
         "messages": [
@@ -85,29 +56,26 @@ async def classify_with_httpx(image_bytes, model_name="meta-llama/llama-4-scout-
         "temperature": 0.1,
         "max_tokens": 1024
     }
-    
+
     async with httpx.AsyncClient() as client:
         response = await client.post(url, headers=headers, json=payload, timeout=60)
         response.raise_for_status()
-        data = response.json()
-        # Groq REST API returns message content similarly
-        return data["choices"][0]["message"]["content"]
+        return response.json()["choices"][0]["message"]["content"]
 
 def parse_classification_response(response_text):
     try:
         json_match = re.search(r'\{[^}]*\}', response_text, re.DOTALL)
         if json_match:
             result = json.loads(json_match.group())
-            if "class" in result and "confidence" in result:
-                return result["class"], float(result["confidence"]), result.get("reasoning", "")
-        # Fallback heuristic
+            return result.get("class", "Other"), float(result.get("confidence", 0.5)), result.get("reasoning", "")
+        # Fallback
         response_lower = response_text.lower()
-        for category in ["Plastic", "Paper", "Metal", "Glass", "Organic"]:
-            if category.lower() in response_lower:
-                return category, 0.7, f"Detected {category.lower()} in response"
+        for cat in ["Plastic","Paper","Metal","Glass","Organic"]:
+            if cat.lower() in response_lower:
+                return cat, 0.7, f"Detected {cat}"
         return "Other", 0.5, "Could not determine category"
-    except Exception as e:
-        return "Other", 0.3, f"Failed to parse response: {str(e)}"
+    except:
+        return "Other", 0.3, "Failed to parse response"
 
 @app.post("/classify")
 async def classify(file: UploadFile = File(...)):
@@ -117,33 +85,19 @@ async def classify(file: UploadFile = File(...)):
             try:
                 response_text = await classify_with_httpx(image_bytes, model)
                 predicted_class, confidence, reasoning = parse_classification_response(response_text)
-                is_recyclable = predicted_class in PRICING and PRICING[predicted_class] > 0
-                price_per_kg = PRICING.get(predicted_class, 0)
-                if not is_recyclable or predicted_class in ["Organic", "Other"]:
-                    return {
-                        "class": "Non-recyclable",
-                        "confidence": confidence,
-                        "recyclable": False,
-                        "price_per_kg": 0,
-                        "debug_info": {
-                            "original_class": predicted_class,
-                            "model_used": model,
-                            "reasoning": reasoning,
-                            "raw_response": response_text[:200]
-                        }
+                is_recyclable = PRICING.get(predicted_class,0) > 0
+                price_per_kg = PRICING.get(predicted_class,0)
+                return {
+                    "class": predicted_class if is_recyclable else "Non-recyclable",
+                    "confidence": confidence,
+                    "recyclable": is_recyclable,
+                    "price_per_kg": price_per_kg if is_recyclable else 0,
+                    "debug_info": {
+                        "model_used": model,
+                        "reasoning": reasoning,
+                        "raw_response": response_text[:200]
                     }
-                else:
-                    return {
-                        "class": predicted_class,
-                        "confidence": confidence,
-                        "recyclable": True,
-                        "price_per_kg": price_per_kg,
-                        "debug_info": {
-                            "model_used": model,
-                            "reasoning": reasoning,
-                            "raw_response": response_text[:200]
-                        }
-                    }
+                }
             except Exception as e:
                 if model == VISION_MODELS[-1]:
                     return {"error": f"All models failed. Last error: {str(e)}"}
