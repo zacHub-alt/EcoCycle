@@ -20,7 +20,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 if not GROQ_API_KEY:
     raise ValueError("⚠️ Missing GROQ_API_KEY environment variable")
 
-# Initialize Groq client (Python SDK)
+# Initialize Groq client
 client = Groq(api_key=GROQ_API_KEY)
 
 # Models & pricing
@@ -44,38 +44,24 @@ CATEGORIES: Plastic, Paper, Metal, Glass, Organic, Other
 Provide confidence and reasoning in JSON format.
 """
 
-async def classify_with_sdk(image_bytes, model_name="meta-llama/llama-4-scout-17b-16e-instruct"):
-    """Call Groq SDK for classification"""
-    base64_image = encode_image_to_base64(image_bytes)
-
-    chat_completion = client.chat.completions.create(
-        messages=[{
-            "role": "user",
-            "content": [
-                {"type": "text", "text": create_waste_classification_prompt()},
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
-            ]
-        }],
-        model=model_name,
-        temperature=0.1,
-        max_tokens=1024
-    )
-    return chat_completion.choices[0].message.content
-
 def parse_classification_response(response_text):
-    """Extract class, confidence, and reasoning from Groq response"""
+    """Extract category, confidence, and reasoning from Groq response"""
     try:
         json_match = re.search(r'\{[^}]*\}', response_text, re.DOTALL)
         if json_match:
             result = json.loads(json_match.group())
-            return result.get("class", "Other"), float(result.get("confidence", 0.5)), result.get("reasoning", "")
+            category = result.get("category") or result.get("class", "Other")
+            confidence = float(result.get("confidence", 0.5))
+            reasoning = result.get("reasoning", "")
+            return category, confidence, reasoning
+
         # Fallback heuristic
         response_lower = response_text.lower()
         for cat in ["Plastic","Paper","Metal","Glass","Organic"]:
             if cat.lower() in response_lower:
                 return cat, 0.7, f"Detected {cat}"
         return "Other", 0.5, "Could not determine category"
-    except:
+    except Exception:
         return "Other", 0.3, "Failed to parse response"
 
 # Endpoints
@@ -85,7 +71,20 @@ async def classify(file: UploadFile = File(...)):
         image_bytes = await file.read()
         for model in VISION_MODELS:
             try:
-                response_text = await classify_with_sdk(image_bytes, model)
+                base64_image = encode_image_to_base64(image_bytes)
+                chat_completion = client.chat.completions.create(
+                    messages=[{
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": create_waste_classification_prompt()},
+                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                        ]
+                    }],
+                    model=model,
+                    temperature=0.1,
+                    max_tokens=1024
+                )
+                response_text = chat_completion.choices[0].message.content
                 predicted_class, confidence, reasoning = parse_classification_response(response_text)
                 is_recyclable = PRICING.get(predicted_class,0) > 0
                 price_per_kg = PRICING.get(predicted_class,0)
