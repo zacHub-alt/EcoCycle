@@ -1,10 +1,10 @@
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from groq import Groq
 import base64
 import json
 import os
 import re
-import httpx
 
 app = FastAPI()
 
@@ -19,6 +19,9 @@ app.add_middleware(
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 if not GROQ_API_KEY:
     raise ValueError("⚠️ Missing GROQ_API_KEY environment variable")
+
+# Initialize Groq client (Python SDK)
+client = Groq(api_key=GROQ_API_KEY)
 
 # Models & pricing
 VISION_MODELS = ["meta-llama/llama-4-scout-17b-16e-instruct"]
@@ -41,28 +44,23 @@ CATEGORIES: Plastic, Paper, Metal, Glass, Organic, Other
 Provide confidence and reasoning in JSON format.
 """
 
-async def classify_with_httpx(image_bytes, model_name="meta-llama/llama-4-scout-17b-16e-instruct"):
-    """Call Groq REST API for classification"""
+async def classify_with_sdk(image_bytes, model_name="meta-llama/llama-4-scout-17b-16e-instruct"):
+    """Call Groq SDK for classification"""
     base64_image = encode_image_to_base64(image_bytes)
-    url = f"https://api.groq.com/v1/models/{model_name}/completions"
-    headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
-    payload = {
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": create_waste_classification_prompt()},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
-                ]
-            }
-        ],
-        "temperature": 0.1,
-        "max_tokens": 1024
-    }
-    async with httpx.AsyncClient() as client:
-        response = await client.post(url, headers=headers, json=payload, timeout=60)
-        response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"]
+
+    chat_completion = client.chat.completions.create(
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": create_waste_classification_prompt()},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+            ]
+        }],
+        model=model_name,
+        temperature=0.1,
+        max_tokens=1024
+    )
+    return chat_completion.choices[0].message.content
 
 def parse_classification_response(response_text):
     """Extract class, confidence, and reasoning from Groq response"""
@@ -87,7 +85,7 @@ async def classify(file: UploadFile = File(...)):
         image_bytes = await file.read()
         for model in VISION_MODELS:
             try:
-                response_text = await classify_with_httpx(image_bytes, model)
+                response_text = await classify_with_sdk(image_bytes, model)
                 predicted_class, confidence, reasoning = parse_classification_response(response_text)
                 is_recyclable = PRICING.get(predicted_class,0) > 0
                 price_per_kg = PRICING.get(predicted_class,0)
@@ -122,28 +120,22 @@ async def analyze_detailed(file: UploadFile = File(...)):
 5. Any identifying text or brands?
 
 Be thorough and descriptive."""
-        url = "https://api.groq.com/v1/models/llava-v1.5-7b-4096-preview/completions"
-        headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
-        payload = {
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": detailed_prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
-                    ]
-                }
-            ],
-            "temperature": 0.3,
-            "max_tokens": 1024
-        }
-        async with httpx.AsyncClient() as client:
-            response = await client.post(url, headers=headers, json=payload, timeout=60)
-            response.raise_for_status()
-            detailed_analysis = response.json()["choices"][0]["message"]["content"]
+
+        chat_completion = client.chat.completions.create(
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": detailed_prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                ]
+            }],
+            model="llava-v1.5-7b-4096-preview",
+            temperature=0.3,
+            max_tokens=1024
+        )
 
         return {
-            "detailed_analysis": detailed_analysis,
+            "detailed_analysis": chat_completion.choices[0].message.content,
             "model_used": "llava-v1.5-7b-4096-preview"
         }
     except Exception as e:
@@ -152,24 +144,19 @@ Be thorough and descriptive."""
 @app.get("/test-connection")
 async def test_connection():
     try:
-        url = "https://api.groq.com/v1/models/meta-llama/llama-4-scout-17b-16e-instruct/completions"
-        headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
-        payload = {
-            "messages": [{"role": "user", "content": "Hello, just testing the connection."}],
-            "max_tokens": 50
-        }
-        async with httpx.AsyncClient() as client:
-            response = await client.post(url, headers=headers, json=payload, timeout=30)
-            response.raise_for_status()
-            test_response = response.json()["choices"][0]["message"]["content"]
-
+        chat_completion = client.chat.completions.create(
+            messages=[{"role": "user", "content": "Hello, just testing the connection."}],
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            max_tokens=50
+        )
         return {
             "status": "SUCCESS! Groq API is working",
-            "test_response": test_response,
+            "test_response": chat_completion.choices[0].message.content,
             "available_models": VISION_MODELS
         }
     except Exception as e:
         return {"error": f"Groq API test failed: {str(e)}"}
+
 @app.get("/")
 async def root():
     return {"status": "EcoCycle backend is running!"}
