@@ -305,12 +305,12 @@ const detectFrame = async () => {
     try {
       const formData = new FormData();
       formData.append("file", image);
-      const API_BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+      const API_BASE_URL = import.meta.env.VITE_API_URL?.replace(/\/$/, '') || "http://127.0.0.1:8000";
 
-      const response = await fetch(`${API_BASE_URL}/classify`, {
-        method: "POST",
-        body: formData,
-      });
+const response = await fetch(`${API_BASE_URL}/classify`, {
+  method: "POST",
+  body: formData,
+});
 
       if (!response.ok) {
         const errorData = await response.json();
