@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "engines": {
-    "node": "18"
+    "node": "22.x"
   },
   "dependencies": {
     "react": "^18.3.1",
