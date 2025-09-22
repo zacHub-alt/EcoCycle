@@ -1,12 +1,5 @@
-# Use Python 3.13 slim image
-FROM python:3.13-slim
-
-# Install system dependencies and Rust
-RUN apt-get update && apt-get install -y curl build-essential
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-
-# Add Cargo to PATH
-ENV PATH="/root/.cargo/bin:${PATH}"
+# Use Python 3.11 slim image to avoid Rust build issues
+FROM python:3.11-slim
 
 # Set working directory
 WORKDIR /app
