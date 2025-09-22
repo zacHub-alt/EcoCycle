@@ -4,7 +4,6 @@
   "installCommand": "npm install",
   "framework": "vite",
   "env": {
-    "VITE_API_URL": "https://ecocycle-50ba.onrender.com
-"
+    "VITE_API_URL": "https://ecocycle-50ba.onrender.com"
   }
 }
