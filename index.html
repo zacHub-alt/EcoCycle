@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#DC2626" />
+    <meta name="description" content="EcoCycle: Turn Ogun State trash into cash" />
+    <title>EcoCycle</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+  </head>
+  <body>
+    <!-- Google Translate Widget -->
+    <div id="google_translate_element"></div>
+
+    <script type="text/javascript">
+      function googleTranslateElementInit() {
+        new google.translate.TranslateElement(
+          {
+            pageLanguage: 'en',
+            includedLanguages: 'en,yo,ha,ig',
+            layout: google.translate.TranslateElement.InlineLayout.SIMPLE,
+            autoDisplay: false
+          },
+          'google_translate_element'
+        );
+
+        // Force label change
+        const interval = setInterval(() => {
+          const gtCombo = document.querySelector('.goog-te-combo');
+          if (gtCombo) {
+            gtCombo.setAttribute('title', 'Select Language');
+            gtCombo.options[0].text = "🌍 Select Language";
+            clearInterval(interval);
+          }
+        }, 500);
+      }
+    </script>
+    <script type="text/javascript" src="//translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"></script>
+
+    <style>
+      /* Hide branding */
+      .goog-logo-link,
+      .goog-te-gadget span {
+        display: none !important;
+      }
+
+      #google_translate_element {
+        position: fixed;
+        top: 10px;
+        right: 10px;
+        z-index: 1000;
+        background: #1f2937; /* dark gray */
+        border: 1px solid #10b981; /* green border */
+        border-radius: 8px;
+        padding: 4px 8px;
+        font-family: 'Inter', sans-serif;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+      }
+
+      /* Translate dropdown */
+      .goog-te-combo {
+        background: #111827;
+        color: #10b981;
+        border: none;
+        padding: 6px 10px;
+        border-radius: 6px;
+        font-size: 14px;
+        font-weight: 600;
+        outline: none;
+        cursor: pointer;
+
+        /* Custom arrow */
+        -webkit-appearance: none;
+        -moz-appearance: none;
+        appearance: none;
+        background-image: url("data:image/svg+xml;charset=UTF-8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20' fill='%2310b981'><polygon points='0,0 20,0 10,10'/></svg>");
+        background-repeat: no-repeat;
+        background-position: right 10px center;
+        background-size: 14px;
+      }
+
+      .goog-te-combo option {
+        background: #111827;
+        color: #10b981;
+        font-weight: 500;
+      }
+
+      /* Responsive shrink for mobile */
+      @media (max-width: 640px) {
+        #google_translate_element {
+          top: auto;
+          bottom: 10px;
+          right: 10px;
+          padding: 2px 6px;
+          font-size: 12px;
+        }
+        .goog-te-combo {
+          font-size: 12px;
+          padding: 4px 6px;
+        }
+      }
+    </style>
+
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
