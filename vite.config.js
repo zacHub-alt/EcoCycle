@@ -4,6 +4,12 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   plugins: [react()],
   build: {
-    target: "esnext", // important for ESM modules like TensorFlow
-  },
+    target: "esnext", // ensures ESM-only packages like tfjs work
+    minify: "esbuild",
+    rollupOptions: {
+      output: {
+        manualChunks: undefined
+      }
+    }
+  }
 });
