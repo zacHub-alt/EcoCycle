@@ -348,21 +348,14 @@ const detectFrame = async () => {
       setError("Please upload an image!");
       return;
     }
-
+    
     setLoading(true);
     setError("");
 
-    try {
+     try {
       const formData = new FormData();
       formData.append("file", image);
       const API_BASE_URL = import.meta.env.VITE_API_URL?.replace(/\/$/, '') || "http://127.0.0.1:8000";
-
-<<<<<<< HEAD
-const response = await fetch(`${API_BASE_URL}/classify`, {
-  method: "POST",
-  body: formData,
-});
-=======
       const url = `${API_BASE_URL}/classify`;
       console.debug("[EcoCycle] classifyWaste ->", url);
       // Debug: list formData keys (won't print file content)
@@ -372,7 +365,6 @@ const response = await fetch(`${API_BASE_URL}/classify`, {
         method: "POST",
         body: formData,
       });
->>>>>>> restored-wip
 
       if (!response.ok) {
         // Try to read text for better debugging
