@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: fastapi-backend
+    env: docker
+    plan: free
+    dockerfilePath: Dockerfile
+    # The port is set in the Dockerfile CMD (8080)

@@ -1,0 +1,49 @@
+# --------------------
+# Node / React
+# --------------------
+node_modules/
+dist/
+dist-ssr/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.local
+
+# --------------------
+# Python / Backend
+# --------------------
+# Virtual environments
+env/
+venv/
+
+# Byte-compiled / cache files
+*.pyc
+__pycache__/
+
+# --------------------
+# Logs
+# --------------------
+logs/
+*.log
+
+# --------------------
+# IDE / Editor
+# --------------------
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# --------------------
+# OS files
+# --------------------
+.DS_Store
+Thumbs.db
+
+# Local backend environment (do not commit secrets)
+backend/.env
